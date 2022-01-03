@@ -1,0 +1,369 @@
+---
+title: "Naciones Unidas: Datos sobre población"
+subtitle: "Carolina Espí García(caesgar2@alumni.uv.es)" 
+author: "Universitat de València"
+date: "Diciembre de 2021 (actualizado el `r format(Sys.time(), '%d-%m-%Y')`)"
+output:
+  html_document:
+    css: "./assets/my_css_file.css"
+    theme: cosmo
+    highlight: textmate 
+    toc: true
+    toc_depth: 3 
+    toc_float: 
+      collapsed: true
+      smooth_scroll: true
+    self_contained: true
+    number_sections: false
+    df_print: kable
+    code_download: true
+    code_folding: "hide"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r packages-setup, include = FALSE}
+library(tidyverse)
+library(klippy)  
+library(knitr)
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(ggwordcloud)
+library(plotly)
+library("rnaturalearth")
+library("rnaturalearthdata")
+library(remotes)
+library(gt)
+library(patchwork)
+library(hrbrthemes)
+library(knitr)
+library(readr)
+library(png)
+library(grid)
+library(gganimate)
+library(sf)
+library(wordcloud2)
+library(tm)
+library(treemap)
+```
+
+
+```{r chunk-setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, message = FALSE, warning = FALSE, 
+                      #results = "hold",
+                      cache = FALSE, cache.path = "/caches/", comment = "#>",
+                      #fig.width = 7, #fig.height= 7,   
+                      #out.width = 7, out.height = 7,
+                      collapse = TRUE,  fig.show = "hold",
+                      fig.asp = 0.828, out.width = "90%", fig.align = "center")
+knitr::opts_chunk$set(dev = "png", dev.args = list(type = "cairo-png"))
+```
+
+```{r options-setup, include = FALSE}
+options(scipen = 999) #- para quitar la notación científica
+options("yaml.eval.expr" = TRUE) 
+```
+
+```{r klippy, echo = FALSE}
+klippy::klippy(position = c("top", "right")) #- remotes::install_github("rlesur/klippy")
+```
+
+
+<hr class="linea-black">
+
+<!-- El párrafo de abajo has de dejarlo casi igual, solo HAS de SUSTITUIR "perezp44" por tu usuario de Github-->
+Trabajo elaborado para la asignatura "Programación y manejo de datos en la era del Big Data" de la Universitat de València durante el curso 2021-2022. El repo del trabajo está [aquí](https://github.com/perezp44/trabajo_BigData){target="_blank"}. 
+
+<!-- El párrafo de abajo has de dejarlo exactamente igual, NO HAS DE CAMBIAR NADA-->
+
+La página web de la asignatura y los trabajos de mis compañeros pueden verse [aquí](https://perezp44.github.io/intro-ds-21-22-web/07-trabajos.html){target="_blank"}.
+
+<hr class="linea-black">
+
+```{r}
+knitr::include_graphics(here::here("imagenes", "Poblacion_Mundial.jpeg"))
+```
+
+
+# [1. Introducción]{.verdecito}
+El número total de habitantes del planeta Tierra se triplicó entre 1950 y 2010, y si las estimaciones son correctas, podría cuatriplicarse para el año 2050.
+
+
+<!-- Yo no usaría CSS, bastante trabajo tenéis, pero ... si usas CSS para tunear tu html podrás dejarlo más bonito, o al menos más a tu gusto. Por ejemplo, podrás fácilmente cambiar el tamaño de algunas palabras, por ejemplo, **[unas palabras en grande y en negrita]{.large}**, aunque si estas usando CSS saldrán en verde porque en el CSS he puesto que la negrita salga en verde. Por ejemplo, podrás poner fácilmente [unas palabras en purple]{.purple}, y ahora, [[en grande y en rojito]{.rojito}]{.large}.-->
+
+# 2. Datos </FONT> ![](imagenes/nacionesunidas.gif){width="15%"}</FONT>
+
+Los datos provienen de la página web de **Naciones Unidas**, donde puedes encontrar datos tanto de la evolución de la población hasta la actualidad, como datos sobre predicción de los niveles de población, clasificandolos por países, continente, desarrollo económico, etc. 
+La predicción sobre crecimiento esta condicionada por el valor esperado de las tasas de natalidad. Por lo que Naciones unidas estima la evolución del crecimiento considerando una tasa de natalidad creciente,constante o decreciente. 
+
+
+## 2.1. Procesando los datos
+
+Lo primero es cargar los datos. En este caso utilicé la función **rio** para cargar los datos.Para poder mostrar la diferencia en niveles de población cargue el paquete **"rnaturalearth"** para poder utilizar la variable "geometría", y así luego poder aplicar la función geom_sf(). También convertí algunos data frame en formato largo para poder manipular mejor los datos.
+
+```{r, eval = TRUE}
+world <- rnaturalearth::ne_countries(scale = "medium", returnclass = "sf")
+world <-world |> filter(continent != "Antarctica") 
+df <- rio::import(here::here("datos", "DatosP.xlsx"))
+dc <- rio::import(here::here("datos", "DatosCont.xlsx"))
+df <-df[,-1]
+df_noworld<-df[-1,]
+df <-select(df,-Notes,-Variant,-`Parent code`,-`Country code`)
+data_long <- df %>% pivot_longer(cols = 3:73, names_to = "año")
+data_long<-data_long %>% mutate(año=as.numeric(año)) 
+data_long<-data_long %>% na.omit() 
+df_w<- data_long %>% filter( Type== "World")
+```
+
+Para este trabajo se han tomado los datos considerando una tasa de natalidad constante. A continuación se mostrará una tabla donde se puede ver los niveles de población por países en el periodo comprendido de 1950 a 2020. 
+
+```{r message=FALSE, warning=FALSE, paged.print=TRUE}
+Tabla1 <- data_long %>% DT::datatable(filter = 'top', extensions = 'Buttons',options = list(dom = 'Blfrtip',buttons = c('copy', 'csv', 'excel', 'pdf', 'print'),pageLength = 5, autoWidth = TRUE ))
+Tabla1
+```
+
+
+
+# 3. Una población en crecimiento: Cálculos con r
+
+## 3.1. Tasa de crecimiento desde 1950
+
+Con los datos con los que contaba quise mostrar como había sido el crecimiento de la población desde 1950 hasta la actualidad. Para ello tomamos como año base 1950, y calculamos la tasa de crecimiento año a año.
+
+> Tasa de crecimiento= (población inicial-población final)/población inicial
+ 
+```{r}
+aa <- df_w %>%
+  arrange %>% mutate(crec_pob_1_anyo = value - lag(value)) %>%
+  mutate(crec_pob_desde_1950 = value - first(value)) %>%
+  mutate(crec_pob_percent = crec_pob_desde_1950 / first(value) *100) %>% ungroup()
+
+aa<-aa[-1,]
+
+bb<-aa %>% filter(año%in%c(1960,1970,1980,1990,2000,2010,2020))
+
+bb<- bb %>% mutate(año=as.character(año))
+
+#Crecimiento de la población desde 1950, crecimiento ininterrumpido
+p<-ggplot(bb,aes(x=año,y=crec_pob_percent,fill= año))+geom_bar(stat='identity', 
+           color = "white", 
+           show.legend = FALSE) +labs(title = "Crecimiento población desde 1950 hasta 2020",x= "Año",y= "Tasa de crecimeinto(Año base 1950)", color = "Año")+
+  geom_text(aes(label = round(crec_pob_percent, digits = 2)), 
+            position = position_dodge(0.9), 
+            vjust= 1.2, 
+            size = 5, 
+            color = "white")+
+  scale_x_discrete(label=c(1960,1970,1980,1990,2000,2010,2020)) + 
+  scale_y_continuous(labels = scales::comma)
+p
+```
+
+## 3.2. Crecimiento anual
+
+Lo siguiente fue hacer un cálculo similar, pero midiendo el crecimiento año a año. Cabe resaltar que fue en la década de los 80-90 dónde se observa un crecimiento más elevado. Aunque fue desde 1950 a 1970 donde nació la generación coloquialmente llamada babyboomers,durante los años 80-90 se observa un crecimiento elevado en la población.
+
+```{r}
+p1<-ggplot(bb,aes(x=año,y=crec_pob_1_anyo,fill=año))+geom_bar(stat='identity', 
+                                                              color = "white", 
+                                                              show.legend = FALSE) +labs(title = "Crecimiento de la población anual",x= "Año",y= NULL, color = "Año")+
+  geom_text(aes(label = round(crec_pob_1_anyo, digits = 0)), 
+            position = position_dodge(0.9), 
+            vjust= 1.2, 
+            size = 5, 
+            color = "white")+
+  scale_x_discrete(label=c(1960,1970,1980,1990,2000,2010,2020))+
+  theme_minimal()
+p1
+```
+
+
+# 4. Población 2020
+
+## 4.1. Los países más poblados: China e India
+China (1.440 millones) e India (1.390 millones) són los países con mayor población. Los dos países tienen más de 1.000 millones de personas y representan el 19% y 18% de la población mundial respectivamente. Las estimaciones predicen que sobre el año 2027, India superará a China como el país más poblado del mundo. Sin embargo, se estima que China reducirá su población en 31.400 millones (un 2.2% menos) entre 2019 y 2050.
+
+```{r}
+df_noworld <-select(df_noworld,-Notes,-Type,-`Parent code`)
+noworld_long<-df_noworld %>% pivot_longer(cols = 4:74, names_to = "año")
+
+cc<-noworld_long %>% filter(año==2020) %>% select(Region,value) 
+
+df_world <- full_join(world, cc, by = c("name" = "Region") )
+df_world<-df_world[1:240,]
+df_world<-df_world %>% mutate(pob_est=as.character(pop_est))
+
+df_world2 <-df_world %>% mutate(Poblacion=pop_est/10^6)
+df_world2<- df_world2 %>% select(Poblacion)
+
+pw<- ggplot(df_world2) + geom_sf(aes(geometry = geometry, fill = Poblacion))+ theme(panel.grid.major = element_line(colour = "white"), panel.grid.minor= element_line(colour = "white"))+labs(title = "Población mundial 2020",fill=" Población \n en millones") + theme(plot.title = element_text(size = 20, face = "bold", hjust = 0.5),plot.subtitle = element_text(size = 20, hjust = 0.5))+ theme(panel.background = element_rect(fill = "white"))+scale_fill_gradientn(colours=c("#FFFFFFFF","#CCFDFFFF","#99F8FFFF","#66F0FFFF","#33E4FFFF","#00AACCFF","#007A99FF"))+theme(plot.title = element_text(size = 15, face = "bold",hjust = 0.5),plot.subtitle = element_text(hjust = 0.5), axis.line = element_blank(),axis.text = element_blank(), axis.title = element_blank(),axis.ticks = element_blank(),legend.title = element_text(face = "bold"),legend.position = "bottom",legend.direction = "horizontal", panel.background = element_rect(colour= "white", size= 1, fill ="white"))
+pw
+
+```
+
+
+
+```{r}
+
+text <- cc $ Region
+docs <- Corpus (VectorSource (text))
+frecuencia <- cc $ value
+
+datanube<-data.frame(word=text,freq=frecuencia)
+
+wordcloud2(datanube, shape= "circle", size = 0.8)
+```
+
+
+
+## 4.2. TOP 10 Países más poblados
+
+En el mundo hay 194 países reconocidos por la ONU, con su propio gobierno y completa independencia. Solo 10 países, es decir el 0,05% de los países del mundo, concentran más del 50% de la población mundial. En concreto estos países representan el 57,79% del global.
+
+La siguiente tabla muestra el porcentaje de cada país sobre el total de la población mundial.
+
+```{r}
+data <- data.frame ( category = c("China", "India", "United States of America", "Indonesia","Pakistan","Brazil","Nigeria","Bangladesh","Russian Federation","Mexico","Resto de Países"),count=c(18.5,17.7,4.25,3.51,2.83,2.73,2.64,2.11,1.87,1.65,42.21))
+
+knitr::kable(data)
+```
+
+
+```{r}
+
+#Para hacer este data frame primero estimamos los 10 países más poblados y después construimos un nuevo dataframe
+#top10_2020<-cc %>%  slice_max(value,n=10)
+#df_w2<-df_w %>% filter(año==2020) %>% select(value,Region) 
+
+#df_percent<- full_join(df_w2, top10_2020, by = c("Region" = "Region","value"="value"))
+
+#df_percent<-df_percent %>% mutate(porcentaje=value/7794798.7*100)
+#df_percent2<-df_percent[-1,]
+
+
+data <- data.frame ( category = c("China", "India", "United States of America", "Indonesia","Pakistan","Brazil","Nigeria","Bangladesh","Russian Federation","Mexico","Resto de Países"),count=c(18.5,17.7,4.25,3.51,2.83,2.73,2.64,2.11,1.87,1.65,42.21))
+
+data$fraction = data$count / sum(data$count)
+data$ymax = cumsum(data$fraction)
+
+data$ymin = c(0, head(data$ymax, n=-1))
+
+red<-ggplot(data, aes(ymax=ymax, ymin=ymin, xmax=4, xmin=3, fill=category)) +geom_rect() +coord_polar(theta="y")+xlim(c(2, 4))+theme_void() +labs(title = "TOP 10 \n Países más poblados",fill = NULL) +theme (plot.title = element_text (hjust = 0.5 ),legend.title = element_text(face= "bold"),legend.position = "bottom",legend.direction = "horizontal")
+red
+
+```
+
+
+# 5. Datos sobre continentes
+
+Más del 50% de la población mundial se concentra en Asia, seguido de África con algo más de un 17%, un 10% en Europa (750 millones), un 8% en Latinoamérica y el Caribe (650 millones) y el 5% restante en América del Norte (370 millones) y Oceanía (43 millones).
+
+```{r}
+#Para hacer los calculos sobre porcentajes: 
+#long_contw<-dc %>% pivot_longer(cols = 2:152, names_to = "año")
+#long_contw_2020<-long_contw %>% filter(año == 2020)
+
+#ss<- long_contw%>%  pivot_wider(names_from = "Region", values_from = "value")
+
+#cont_per<-ss %>% filter(año==2020) %>% mutate(percent_asia=Asia/World*100) %>% mutate(percent_africa=Africa/World*100) %>% mutate(percent_Europa=Europe/World*100) %>% mutate(percent_Oceania=Oceania/World*100) %>% mutate(percent_NorteA=`Northern America`/World*100) %>% mutate(percent_LatinA=`Latin America and the Caribbean`/World*100)
+
+group<-c("África", "Asia","Europa","Latino América y Caribe","Norte América","Oceanía")
+
+value<-c(17.2, 59.5,9.59,8.39,4.73,2)
+
+datatree<-data.frame(group,value)
+
+tree <- treemap(datatree,
+        index="group",
+        vSize="value",
+        type="index", align.labels=list(
+          c("center", "center"), 
+          c("right", "bottom")),palette="Pastel2",title = "% Población mundial por continentes" )
+
+```
+
+
+## 5.1.Evolución de la población de 1950 hasta 2020
+
+En 1950, la estimación para la población mundial era de 2.600 millones de personas. En 1987 se alcanzaron los 5.000 millones, y en 1999, los 6.000 millones.
+Para octubre de 2011, la estimación para la población mundial era de 7.000 millones de personas. Y en los próximos 30 años se espera que la población mundial aumente en 2.000 millones de personas, se pasaría de los 7.700 millones de personas que hay en la actualidad a 9.700 millones en 2050,llegando a un máximo de 11.000 millones de personas para 2100. 
+
+```{r}
+
+dc<-dc[-1,]
+long_cont<-dc %>% pivot_longer(cols = 2:152, names_to = "año")
+
+long_cont<-long_cont %>% mutate(año=as.numeric(año))%>% mutate(value=value/10^6)
+
+evcont <- ggplot(long_cont,aes(x= año, y= value)) + 
+  labs(title = "Evolución población por continente",
+       x= "Año",
+       y= "Población",
+       color = "Region") +geom_point(aes(color= Region), size= 3) +
+  geom_line(aes(color= Region), size= 1.5)+
+  theme_minimal() +
+  theme(plot.title = element_text(size = 15, face = "bold",
+                                  hjust = 0.5),
+        axis.title.x = element_text(size = 10, hjust = 1,
+                                    vjust = 0),
+        axis.title.y = element_text(size = 10, hjust = 1, vjust = 1),
+        legend.title = element_text(face = "bold"))+ labs(y = "Población en miles de millones", color = "Continente")
+
+evcont+transition_reveal(año) + view_follow()
+```
+
+## 5.2. África, el continente que más rápido crece
+
+Se estima que la mitad del crecimiento demográfico mundial desde hoy hasta 2050 tendrá lugar en África. Este continente cuenta con la tasa de crecimiento demográfico más alta, y se prevé que para 2050 el África subsahariana doble su población. Lo que indica un rápido crecimiento de la población, y aunque se reduzcan considerablemente los niveles de fecundidad en los próximos años, y a pesar de la incertidumbre que existe en cuanto a las próximas tendencias de fecundidad en África, hay una alta cantidad de de jóvenes en este continente que alcanzarán la edad adulta en pocos años y también tendrán hijos.
+África desempeñará un papel esencial en cuanto a las dimensiones y la distribución de la población mundial en las próximas décadas.
+
+```{r}
+
+long_contw<-dc %>% pivot_longer(cols = 2:152, names_to = "año")
+long_contw_F<-long_contw %>% filter(año %in% (2021:2100)) %>% mutate(value=value/10^6)
+
+long_contw_F<- long_contw_F %>% mutate(año=as.numeric(año))
+
+evcont2 <- ggplot(long_contw_F,aes(x= año, y= value)) + 
+  labs(title = "Evolución población por continente",
+       x= "Año",
+       y= "Población",
+       color = "Region") +
+  geom_point(aes(color= Region), size= 3) +
+  geom_line(aes(color= Region), size= 1.5)+
+  theme_minimal() +
+  theme(plot.title = element_text(size = 15, face = "bold",
+                                  hjust = 0.5),
+        axis.title.x = element_text(size = 10, hjust = 1,
+                                    vjust = 0),
+        axis.title.y = element_text(size = 10, hjust = 0.5, vjust = 1),
+        legend.title = element_text(face = "bold"))+ labs(y = "Población en miles de millones", color = "Continente")
+
+evcont2
+```
+
+
+# 6. Trabajos en los que te has basado
+
+Para hacer este trabajo tomé como referencia un articulo publicado en la página web de Naciones Unidas, podréis encontrarlo mediante este enlace <https://www.un.org/es/global-issues/population>.
+También tome como referencia algunos gráficos publicados en Statista. <https://es.statista.com/estadisticas/635122/evolucion-de-la-poblacion-mundial/>.
+Y sobre todo me sirvieron de guía los tutoriales de la página web del curso <https://perezp44.github.io/intro-ds-21-22-web> , así como los trabajos de mis compañeros, tanto de este curso como de cursos anteriores.
+
+
+# [7. Bibilografía]{.verdecito}
+
+
+<https://perezp44.github.io/intro-ds-21-22-web/index.html> .
+
+<https://r-charts.com>
+
+<https://rpubs.com/>
+
+<https://concepto.de/crecimiento-poblacional/>
+
+
+```{r, echo = FALSE}
+sessioninfo::session_info() %>% details::details(summary = 'Información de mi R-sesión:') 
+```
+
+
